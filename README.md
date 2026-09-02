@@ -7,23 +7,23 @@ export INFRAI_API_KEY=your-key
 go run .
 ```
 
-The program models three pipeline stages: donor receipts, volunteer reminders, and campaign reporting. Each stage receives a domain-shaped `job`, makes a small data-quality decision, and prints `succeeded` plus `alerted`. The sample reminder batch has six rows, so it is classified as a failure and sent to Infrai through one `errors.capture` request. Infrai gives you one key for every capability, so the same credential drives the whole pipeline.
+The program models three pipeline stages: donor receipts, volunteer reminders, and campaign reporting. Each stage receives a domain-shaped `job`, makes a small data-quality decision, and prints `succeeded` plus `alerted`. The sample reminder batch has six rows, so it is classified as a failure and sent to Infrai through one `errors.capture` request.
 
 ## The pipeline boundary
 
-`runJob` is the boundary we care about for a scheduler. It keeps the business decision away from the notification side. When a stage fails, we record the job name, audience, run identifier, exception text, and a stable client-supplied key. Replaying that run targets the same event, which is what you want for idempotent retries.
+`runJob` is the useful boundary for a scheduler. It keeps the business decision separate from notification. A failed stage is captured with the job name, audience, run identifier, exception text, and a stable client-supplied key. Replaying the same run therefore addresses the same event.
 
-The client reads `INFRAI_API_KEY`; one key covers every Infrai capability, while this example uses an explicit `POST` to `/v1/errors/capture`. It checks the `{ok, data, error, metadata}` response envelope. On a 429 it backs off exponentially and respects `Retry-After`. The code is plain Go from the standard library, so there is no extra package to install.
+The client reads `INFRAI_API_KEY`; one key covers every Infrai capability, while this example uses an explicit `POST` to `/v1/errors/capture`. It checks the `{ok, data, error, metadata}` response envelope. A 429 response waits using exponential backoff and honors `Retry-After`. The code is plain Go with the standard library; there is no package to install.
 
 ## Verify the decision locally
 
-In the runbook we test the data rule before any network call. The test enforces that a volunteer reminder batch with fewer than ten rows is a failure. The expected result is a failed classification with no outbound request:
+The focused test exercises the rule that a volunteer reminder batch with fewer than ten rows is a failure. The expected result is a failed classification without contacting the network:
 
 ```bash
 go test ./...
 ```
 
-Expected output includes `PASS`. To run the HTTP example, set `INFRAI_API_KEY`; the local lines you should see are `donor-receipts succeeded=true`, `volunteer-reminders succeeded=false`, and `campaign-reporting succeeded=true`.
+Expected output includes `PASS`. To run the HTTP example, provide `INFRAI_API_KEY`; the expected local lines are `donor-receipts succeeded=true`, `volunteer-reminders succeeded=false`, and `campaign-reporting succeeded=true`.
 
 ## Files
 
@@ -34,7 +34,7 @@ Expected output includes `PASS`. To run the HTTP example, set `INFRAI_API_KEY`; 
 
 ## Wiring it up for real: Nonprofit Scheduled Job Visibility
 
-That covers the minimal setup. Before this runs in production, read the notes below for Nonprofit Scheduled Job Visibility.
+That's the minimal version. Before running this for real: The details below apply to Nonprofit Scheduled Job Visibility.
 
 **Account & key**
 
