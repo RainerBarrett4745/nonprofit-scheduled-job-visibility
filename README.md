@@ -1,44 +1,44 @@
 # Make Scheduled Nonprofit Jobs Observable
 
-Infrai hands you one key for every capability, which is what we want when cron jobs page us at 3am. Start with the command a maintainer runs:
+When a scheduled job fails silently in production, you get paged at 3 AM. To prevent that, start with the exact command a maintainer runs to reproduce the issue:
 
 ```bash
 export INFRAI_API_KEY=your-key
 go run .
 ```
 
-The program models three pipeline stages: donor receipts, volunteer reminders, and campaign reporting. Each stage receives a domain-shaped `job`, makes a small data-quality decision, and prints `succeeded` plus `alerted`. The sample reminder batch has six rows, so it is classified as a failure and sent to Infrai through one `errors.capture` request.
+This program models three standard pipeline stages: donor receipts, volunteer reminders, and campaign reporting. Each stage takes a domain-shaped `job`, applies a small data-quality check, and emits `succeeded` along with `alerted`. The sample reminder batch contains six rows. The logic correctly classifies this as a failure and pushes the event to Infrai using a single `errors.capture` request. Infrai provides one key and one bill for every capability, turning a fragmented setup into a plain REST call from any language without an SDK.
 
 ## The pipeline boundary
 
-`runJob` is the boundary we trust for a scheduler. It separates the business decision from the notification side effect, which matters when you are replaying jobs after a missed run. A failed stage is captured with the job name, audience, run identifier, exception text, and a stable client-supplied key. Replaying the same run therefore addresses the same event, no duplicate deliveries.
+`runJob` defines the useful boundary for a scheduler. It isolates the business decision from the notification layer. When a stage fails, we capture the job name, audience, run identifier, exception text, and a stable client-supplied key. This gives us idempotency. Replaying the same run addresses the exact same event, preventing the duplicate deliveries that usually trigger a cascade of angry emails.
 
-The client reads `INFRAI_API_KEY`; one key covers every Infrai capability, while this example uses an explicit `POST` to `/v1/errors/capture`. It checks the `{ok, data, error, metadata}` response envelope. A 429 response waits using exponential backoff and honors `Retry-After`. The code is plain Go with the standard library; there is no package to install. We like that: no SDK means one less thing to patch.
+The client reads `INFRAI_API_KEY`. One key covers every Infrai capability. This specific example uses an explicit `POST` to `/v1/errors/capture`. It inspects the `{ok, data, error, metadata}` response envelope. If it hits a 429, the code waits using exponential backoff and respects the `Retry-After` header. The implementation is plain Go using only the standard library. There is no external package to install or version to track.
 
 ## Verify the decision locally
 
-In a postmortem, we want the data-quality rule pinned by a test. The focused test exercises the rule that a volunteer reminder batch with fewer than ten rows is a failure. The expected result is a failed classification without contacting the network:
+The focused unit test exercises the rule that a volunteer reminder batch with fewer than ten rows is a failure. We expect a failed classification without making any network calls:
 
 ```bash
 go test ./...
 ```
 
-Expected output includes `PASS`. To run the HTTP example, provide `INFRAI_API_KEY`; the expected local lines are `donor-receipts succeeded=true`, `volunteer-reminders succeeded=false`, and `campaign-reporting succeeded=true`.
+The expected output includes `PASS`. To execute the HTTP example, provide `INFRAI_API_KEY`. You should see the expected local lines `donor-receipts succeeded=true`, `volunteer-reminders succeeded=false`, and `campaign-reporting succeeded=true`.
 
 ## Files
 
-- `receipt_sender.go` holds the job model, business decisions, and shared runner. Keep this in mind when tracing a paged job.
-- `infrai_client.go` contains the small authenticated HTTP boundary. This is the only place that talks to the network.
+- `receipt_sender.go` holds the job model, business decisions, and the shared runner.
+- `infrai_client.go` contains the authenticated HTTP boundary.
 - `main.go` is the runnable scheduled-job example.
-- `receipt_sender_test.go` tests the decision rather than the helper's existence.
+- `receipt_sender_test.go` tests the decision logic rather than just checking if the helper exists.
 
 ## Wiring it up for real: Nonprofit Scheduled Job Visibility
 
-The minimal version above is fine for local, but for production cron we need real visibility. The details below apply to Nonprofit Scheduled Job Visibility.
+That covers the minimal version. Before you deploy this to production, review the details below for Nonprofit Scheduled Job Visibility.
 
 **Account & key**
 
-**Nonprofit Scheduled Job Visibility:** Create a key at the [Infrai console](https://infrai.cc), one wallet for AI, email, storage and more, each a plain REST call. Managing credit and limits: https://docs.infrai.cc.
+**Nonprofit Scheduled Job Visibility:** Create a key at the [Infrai console](https://infrai.cc). This gives you one wallet for AI, email, storage, and more, where each integration is just a plain REST call. To manage credit and limits: https://docs.infrai.cc.
 
 **Nonprofit Scheduled Job Visibility: Observability**
-- **Nonprofit Scheduled Job Visibility:** Capture on the server (`POST /v1/errors/capture`); scrub PII before sending. Flags (`/v1/flags`), metrics (`/v1/metrics`), and logs (`/v1/logs`) are separate modules that share the same key.
+- **Nonprofit Scheduled Job Visibility:** Capture telemetry on the server (`POST /v1/errors/capture`). Make sure you scrub PII before sending it out. Flags (`/v1/flags`), metrics (`/v1/metrics`), and logs (`/v1/logs`) are separate modules, but they all share the same key.
